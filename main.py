@@ -59,6 +59,16 @@ def create_article(article: ArticleCreate, user: dict = Depends(get_current_user
     db_articles.append(new_article)
     return new_article
 
+@app.put("/articles/{article_id}", response_model=Article)
+def update_article(article_id: int, updated_article: ArticleCreate, user: dict = Depends(get_current_user)):
+    for index, article in enumerate(db_articles):
+        if article.id == article_id:
+            new_article = Article(id=article_id, **updated_article.dict())
+            db_articles[index] = new_article
+            return new_article
+    raise HTTPException(status_code=404, detail="Article not found")
+
+
 @app.delete("/articles/{article_id}")
 def delete_article(article_id: int, user: dict = Depends(get_current_user)):
     for index, article in enumerate(db_articles):
