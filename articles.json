@@ -1,8 +1,16 @@
 [
     {
         "id": 1,
-        "title": "Proba",
-        "content": "Daca functioneaza sunt rege",
-        "published": true
+        "title": "Lant",
+        "content": "Lant de aur",
+        "published": true,
+        "user_id": 1
+    },
+    {
+        "id": 2,
+        "title": "Nimic",
+        "content": "testamr",
+        "published": false,
+        "user_id": 1
     }
 ]
