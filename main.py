@@ -2,6 +2,30 @@ from fastapi import FastAPI, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import List, Optional
 
+import bcrypt
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+
+from fastapi.security import OAuth2PasswordRequestForm
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
+
+SECRET_KEY = "secrettoken123"  
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+from fastapi.security import OAuth2PasswordBearer
+
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="login",
+    scopes={},  # evită extra scopuri
+    description="Autentificare simplă cu username și parolă"
+)
+
 app = FastAPI()
 
 # ----------------------------
@@ -27,6 +51,38 @@ def load_articles():
                 return []
     return []
 
+# ----------------------------
+# USER JSON
+# ----------------------------
+
+USERS_FILE = "users.json"
+
+def load_users():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "r") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return []
+    return []
+
+def save_users(users):
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f, indent=4)
+
+# ----------------------------
+# USER MODELS
+# ----------------------------
+
+class User(BaseModel):
+    id: int
+    username: str
+    password: str  # parola va fi hashuită
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+
 
 # ----------------------------
 # MODELE
@@ -43,15 +99,66 @@ class ArticleCreate(BaseModel):
     content: str
     published: Optional[bool] = True
 
+
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes = 15))
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def get_user_by_username(username: str):
+    users = load_users()
+    for user in users:
+        if user["username"] == username:
+            return user
+    return None
+
+@app.post("/login")
+def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = get_user_by_username(form_data.username)
+    if not user:
+        raise HTTPException(status_code=400, detail="Incorrect username or password")
+    if not verify_password(form_data.password, user["password"]):
+        raise HTTPException(status_code=400, detail="Incorrect username or password")
+    access_token = create_access_token(data={"sub": user["id"]}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
 # ----------------------------
 # DEPENDENCY
 # ----------------------------
 
-def get_current_user():
-    return {"username": "admin"}
+from fastapi import Security
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"}
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: int = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    user = get_user_by_id(user_id)  # Va trebui să implementezi această funcție
+    if user is None:
+        raise credentials_exception
+    return user
+
+def get_user_by_id(user_id: int):
+    users = load_users()
+    for user in users:
+        if user["id"] == user_id:
+            return user
+    return None
+
 
 # ----------------------------
-# FAKE DATABASE
+# DATABASE JSON
 # ----------------------------
 
 db_articles: List[Article] = load_articles()
@@ -67,6 +174,23 @@ def read_root():
 # ----------------------------
 # GET all articles (with filter)
 # ----------------------------
+
+@app.post("/register")
+def register_user(user: UserCreate):
+    users = load_users()
+    if any(u["username"] == user.username for u in users):
+        raise HTTPException(status_code=400, detail = "username already exists")
+    
+    new_user = {
+        "id": users[-1]["id"] + 1 if users else 1,
+        "username": user.username,
+        "password": hash_password(user.password)
+    }
+
+    users.append(new_user)
+    save_users(users)
+    return {"message": "User registered successfully"} 
+
 
 @app.get("/articles", response_model=List[Article])
 def get_articles(
