@@ -194,18 +194,29 @@ def get_published_articles():
 def get_my_articles(user: dict = Depends(get_current_user)):
     return [a for a in db_articles if a.user_id == user["id"]]
 
-from fastapi import Security
+from fastapi.security import OAuth2
+from starlette.requests import Request
+from typing import Optional
+
+class OAuth2PasswordBearerOptional(OAuth2PasswordBearer):
+    async def __call__(self, request: Request) -> Optional[str]:
+        authorization: str = request.headers.get("Authorization")
+        if not authorization:
+            return None  
+        return await super().__call__(request)
+
+
+oauth2_scheme_optional = OAuth2PasswordBearerOptional(tokenUrl="login")
 
 @app.get("/articles/{article_id}", response_model=Article)
-def get_article(article_id: int, token: Optional[str] = Depends(oauth2_scheme)):
+def get_article(article_id: int, token: Optional[str] = Depends(oauth2_scheme_optional)):
     article = next((a for a in db_articles if a.id == article_id), None)
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
 
     if article.published:
-        return article  # articol public
+        return article
 
-    # articol privat: verificăm autentificarea
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
